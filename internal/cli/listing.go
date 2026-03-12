@@ -82,12 +82,26 @@ func handleListingCommands(currentFlags *Flags, fabricDb *fsdb.Db, registry *cor
 
 	if currentFlags.ListAllModels {
 		var models *ai.VendorsModels
-		if models, err = registry.VendorManager.GetModels(); err != nil {
+		if models, err = registry.GetModels(); err != nil {
+			if isNoConfiguredVendorsError(err) {
+				if currentFlags.ShellCompleteOutput {
+					return true, nil
+				}
+				fmt.Println(formatListModelsBootstrapGuidance(currentFlags.Vendor))
+				return true, nil
+			}
 			return true, err
 		}
 
 		if currentFlags.Vendor != "" {
 			models = models.FilterByVendor(currentFlags.Vendor)
+			if len(models.GroupsItems) == 0 {
+				if currentFlags.ShellCompleteOutput {
+					return true, nil
+				}
+				fmt.Println(formatListModelsBootstrapGuidance(currentFlags.Vendor))
+				return true, nil
+			}
 		}
 
 		if currentFlags.ShellCompleteOutput {

@@ -243,6 +243,43 @@ func TestHandleListingCommandsListAllModelsShellCompleteWithVendorFilter(t *test
 	require.Equal(t, "claude-3-7-sonnet\n", stdout)
 }
 
+func TestHandleListingCommandsListAllModelsConfiguresVendorsBeforeListing(t *testing.T) {
+	registry := newConfigurationRegistry(t)
+	registry.VendorManager.Clear()
+
+	stdout, err := captureStdout(func() error {
+		handled, runErr := handleListingCommands(&Flags{
+			LatestPatterns: "0",
+			ListAllModels:  true,
+		}, nil, registry)
+		require.True(t, handled)
+		return runErr
+	})
+	require.NoError(t, err)
+	require.Contains(t, stdout, "VendorA|alpha")
+	require.Contains(t, stdout, "VendorB|beta")
+}
+
+func TestHandleListingCommandsListAllModelsShowsBootstrapGuidanceWhenNoProvidersConfigured(t *testing.T) {
+	registry := newConfigurationRegistry(t)
+	registry.VendorManager.Clear()
+	registry.VendorsAll.Clear()
+
+	stdout, err := captureStdout(func() error {
+		handled, runErr := handleListingCommands(&Flags{
+			LatestPatterns: "0",
+			ListAllModels:  true,
+			Vendor:         "Bedrock",
+		}, nil, registry)
+		require.True(t, handled)
+		return runErr
+	})
+	require.NoError(t, err)
+	require.Contains(t, stdout, "No AI providers are configured yet.")
+	require.Contains(t, stdout, "fabric --configure-provider Bedrock")
+	require.Contains(t, stdout, "fabric --setup")
+}
+
 func TestHandleListingCommandsListVendors(t *testing.T) {
 	vendorsAll := ai.NewVendorsManager()
 	vendorsAll.AddVendors(

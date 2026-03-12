@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -159,15 +160,24 @@ def run_case(case: SmokeCase, fabric_bin: Path, cwd: Path, vendor: str, model: s
         model,
     ]
 
-    completed = subprocess.run(
-        cmd,
-        cwd=str(cwd),
-        input=case.stdin_text,
-        text=True,
-        capture_output=True,
-        timeout=timeout_seconds,
-        env=os.environ.copy(),
-    )
+    started_at = time.monotonic()
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            input=case.stdin_text,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+            env=os.environ.copy(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started_at
+        raise RuntimeError(
+            f"{case.pipeline}: timed out after {elapsed:.2f}s while waiting for stage {case.to_stage} "
+            f"(timeout={timeout_seconds}s per pipeline case)"
+        ) from exc
+    elapsed = time.monotonic() - started_at
 
     if completed.returncode != 0:
         raise RuntimeError(
@@ -191,7 +201,7 @@ def run_case(case: SmokeCase, fabric_bin: Path, cwd: Path, vendor: str, model: s
     if run_summaries[-1].get("status") != "passed":
         raise RuntimeError(f"{case.pipeline}: run_summary status is not passed")
 
-    print(f"PASS {case.pipeline} -> {case.to_stage}")
+    print(f"PASS {case.pipeline} -> {case.to_stage} ({elapsed:.2f}s)")
 
 
 def select_cases(pipeline_filter: str) -> list[SmokeCase]:
@@ -209,6 +219,7 @@ def select_cases(pipeline_filter: str) -> list[SmokeCase]:
 
 def main() -> int:
     args = parse_args()
+    suite_started_at = time.monotonic()
 
     if args.list_cases:
         for case in DEFAULT_CASES:
@@ -237,7 +248,8 @@ def main() -> int:
             timeout_seconds=args.timeout_seconds,
         )
 
-    print("All live pipeline smoke checks passed.")
+    suite_elapsed = time.monotonic() - suite_started_at
+    print(f"All live pipeline smoke checks passed in {suite_elapsed:.2f}s.")
     return 0
 
 

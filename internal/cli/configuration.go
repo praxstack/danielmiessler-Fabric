@@ -55,20 +55,34 @@ func handleConfigurationCommands(currentFlags *Flags, registry *core.PluginRegis
 }
 
 func configureDefaultModel(registry *core.PluginRegistry, vendorFilter, requestedModel string) error {
-	models, err := registry.GetModels()
-	if err != nil {
-		return err
-	}
-
 	vendorFilter = strings.TrimSpace(vendorFilter)
-	if vendorFilter != "" {
-		models = models.FilterByVendor(vendorFilter)
-		if len(models.GroupsItems) == 0 {
-			return fmt.Errorf("vendor %q is not configured or has no available models", vendorFilter)
+	requestedModel = strings.TrimSpace(requestedModel)
+
+	models, modelsErr := registry.GetModels()
+	if requestedModel != "" {
+		vendorName, modelName, handled, err := resolveExplicitModelSelection(registry, models, modelsErr, vendorFilter, requestedModel)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return persistDefaultModel(registry, vendorName, modelName)
 		}
 	}
 
-	requestedModel = strings.TrimSpace(requestedModel)
+	if modelsErr != nil {
+		if isNoConfiguredVendorsError(modelsErr) {
+			return newConfigureModelBootstrapError(vendorFilter)
+		}
+		return modelsErr
+	}
+
+	if vendorFilter != "" {
+		models = models.FilterByVendor(vendorFilter)
+		if len(models.GroupsItems) == 0 {
+			return newVendorHasNoModelsError(vendorFilter)
+		}
+	}
+
 	if requestedModel == "" {
 		models.PrintWithVendor(false, registry.Defaults.Vendor.Value, registry.Defaults.Model.Value)
 
@@ -94,12 +108,16 @@ func configureDefaultModel(registry *core.PluginRegistry, vendorFilter, requeste
 		return err
 	}
 
+	return persistDefaultModel(registry, vendorName, modelName)
+}
+
+func persistDefaultModel(registry *core.PluginRegistry, vendorName, modelName string) error {
 	registry.Defaults.Vendor.Value = vendorName
 	registry.Defaults.Model.Value = modelName
-	if err = os.Setenv(registry.Defaults.Vendor.EnvVariable, vendorName); err != nil {
+	if err := os.Setenv(registry.Defaults.Vendor.EnvVariable, vendorName); err != nil {
 		return err
 	}
-	if err = os.Setenv(registry.Defaults.Model.EnvVariable, modelName); err != nil {
+	if err := os.Setenv(registry.Defaults.Model.EnvVariable, modelName); err != nil {
 		return err
 	}
 
@@ -107,6 +125,64 @@ func configureDefaultModel(registry *core.PluginRegistry, vendorFilter, requeste
 	fmt.Printf("Default model: %s\n", modelName)
 
 	return registry.SaveEnvFile()
+}
+
+func resolveExplicitModelSelection(
+	registry *core.PluginRegistry,
+	models *ai.VendorsModels,
+	modelsErr error,
+	vendorFilter, requestedModel string,
+) (vendorName string, modelName string, handled bool, err error) {
+	if requestedModel == "" {
+		return "", "", false, nil
+	}
+
+	if vendor, model, ok := splitVendorModelSelection(requestedModel); ok {
+		if vendorFilter != "" && !strings.EqualFold(vendorFilter, vendor) {
+			return "", "", true, fmt.Errorf("selection vendor %q does not match requested vendor %q", vendor, vendorFilter)
+		}
+
+		canonicalVendor, found := canonicalVendorName(registry, vendor)
+		if !found {
+			return "", "", true, fmt.Errorf("vendor %q was not found", vendor)
+		}
+
+		if modelsErr == nil && modelExistsForVendor(models, canonicalVendor, model) {
+			model = canonicalModelName(models, canonicalVendor, model)
+		}
+
+		return canonicalVendor, model, true, nil
+	}
+
+	if vendorFilter == "" {
+		return "", "", false, nil
+	}
+
+	canonicalVendor, found := canonicalVendorName(registry, vendorFilter)
+	if !found {
+		return "", "", true, fmt.Errorf("vendor %q was not found", vendorFilter)
+	}
+
+	if modelsErr == nil {
+		filtered := models.FilterByVendor(canonicalVendor)
+		if len(filtered.GroupsItems) > 0 && modelExistsForVendor(filtered, canonicalVendor, requestedModel) {
+			requestedModel = canonicalModelName(filtered, canonicalVendor, requestedModel)
+		}
+	}
+
+	return canonicalVendor, requestedModel, true, nil
+}
+
+func canonicalVendorName(registry *core.PluginRegistry, vendor string) (string, bool) {
+	for _, manager := range []*ai.VendorsManager{registry.VendorManager, registry.VendorsAll} {
+		if manager == nil {
+			continue
+		}
+		if resolved := manager.FindByName(vendor); resolved != nil {
+			return resolved.GetName(), true
+		}
+	}
+	return "", false
 }
 
 func resolveDefaultModelSelection(models *ai.VendorsModels, vendorFilter, selection string) (vendorName string, modelName string, err error) {

@@ -437,6 +437,12 @@ func (o *PluginRegistry) SetupVendor(vendorName string) (err error) {
 }
 
 func (o *PluginRegistry) ConfigureVendors() {
+	if o.VendorManager == nil {
+		o.VendorManager = ai.NewVendorsManager()
+	}
+	if o.VendorsAll == nil {
+		return
+	}
 	o.VendorManager.Clear()
 	for _, vendor := range o.VendorsAll.Vendors {
 		if vendorErr := vendor.Configure(); vendorErr == nil && vendor.IsConfigured() {
