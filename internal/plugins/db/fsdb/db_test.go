@@ -9,8 +9,8 @@ func TestDb_Configure(t *testing.T) {
 	dir := t.TempDir()
 	db := NewDb(dir)
 	err := db.Configure()
-	if err == nil {
-		t.Fatalf("db is configured, but must not be at empty dir: %v", dir)
+	if err != nil {
+		t.Fatalf("db failed to configure without .env file: %v", err)
 	}
 	if db.IsEnvFileExists() {
 		t.Fatalf("db file exists, but must not be at empty dir: %v", dir)
@@ -24,6 +24,15 @@ func TestDb_Configure(t *testing.T) {
 	err = db.Configure()
 	if err != nil {
 		t.Fatalf("db is not configured, but shall be after save: %v", err)
+	}
+}
+
+func TestDb_LoadEnvFileMissingIsNotAnError(t *testing.T) {
+	dir := t.TempDir()
+	db := NewDb(dir)
+	err := db.LoadEnvFile()
+	if err != nil {
+		t.Fatalf("expected missing .env to be ignored, got: %v", err)
 	}
 }
 

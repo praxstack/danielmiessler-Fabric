@@ -112,6 +112,31 @@ func TestHandleConfigurationCommandsConfigureProviderAndModel(t *testing.T) {
 	require.Contains(t, string(envContent), "DEFAULT_MODEL=x-model")
 }
 
+func TestConfigureDefaultModelAllowsExplicitVendorModelWithoutCatalog(t *testing.T) {
+	registry := newConfigurationRegistry(t)
+	registry.VendorManager.Clear()
+
+	err := configureDefaultModel(registry, "VendorB", "custom-model")
+	require.NoError(t, err)
+	require.Equal(t, "VendorB", registry.Defaults.Vendor.Value)
+	require.Equal(t, "custom-model", registry.Defaults.Model.Value)
+
+	envContent, readErr := os.ReadFile(registry.Db.EnvFilePath)
+	require.NoError(t, readErr)
+	require.Contains(t, string(envContent), "DEFAULT_VENDOR=VendorB")
+	require.Contains(t, string(envContent), "DEFAULT_MODEL=custom-model")
+}
+
+func TestConfigureDefaultModelAllowsExplicitVendorPipeModelWithoutCatalog(t *testing.T) {
+	registry := newConfigurationRegistry(t)
+	registry.VendorManager.Clear()
+
+	err := configureDefaultModel(registry, "", "VendorA|direct-model")
+	require.NoError(t, err)
+	require.Equal(t, "VendorA", registry.Defaults.Vendor.Value)
+	require.Equal(t, "direct-model", registry.Defaults.Model.Value)
+}
+
 func newConfigurationRegistry(t *testing.T) *core.PluginRegistry {
 	t.Helper()
 
@@ -178,6 +203,17 @@ func TestConfigureDefaultModelRejectsUnknownVendor(t *testing.T) {
 	err := configureDefaultModel(registry, "MissingVendor", "beta")
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "MissingVendor"))
+}
+
+func TestConfigureDefaultModelGuidesWhenVendorIsNotConfigured(t *testing.T) {
+	registry := newConfigurationRegistry(t)
+	registry.VendorManager.Clear()
+	registry.VendorsAll.Clear()
+
+	err := configureDefaultModel(registry, "Bedrock", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fabric --configure-provider Bedrock")
+	require.Contains(t, err.Error(), "-m <model>")
 }
 
 func TestHandleConfigurationCommandsRejectsIncompleteProviderSetup(t *testing.T) {
