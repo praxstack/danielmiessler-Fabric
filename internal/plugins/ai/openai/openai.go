@@ -26,16 +26,19 @@ func NewClient() (ret *Client) {
 	return NewClientCompatibleWithResponses("OpenAI", "https://api.openai.com/v1", true, nil)
 }
 
+// also registers OpenRouter-related setup questions on the client.
 func NewClientCompatible(vendorName string, defaultBaseUrl string, configureCustom func() error) (ret *Client) {
 	ret = NewClientCompatibleNoSetupQuestions(vendorName, configureCustom)
 
 	ret.ApiKey = ret.AddSetupQuestion("API Key", true)
 	ret.ApiBaseURL = ret.AddSetupQuestion("API Base URL", false)
 	ret.ApiBaseURL.Value = defaultBaseUrl
+	ret.registerOpenRouterSetupQuestions()
 
 	return
 }
 
+// and registers OpenRouter-related setup questions. If configureCustom is non-nil it is used during client construction.
 func NewClientCompatibleWithResponses(vendorName string, defaultBaseUrl string, implementsResponses bool, configureCustom func() error) (ret *Client) {
 	ret = NewClientCompatibleNoSetupQuestions(vendorName, configureCustom)
 
@@ -43,6 +46,7 @@ func NewClientCompatibleWithResponses(vendorName string, defaultBaseUrl string, 
 	ret.ApiBaseURL = ret.AddSetupQuestion("API Base URL", false)
 	ret.ApiBaseURL.Value = defaultBaseUrl
 	ret.ImplementsResponses = implementsResponses
+	ret.registerOpenRouterSetupQuestions()
 
 	return
 }
@@ -61,11 +65,14 @@ func NewClientCompatibleNoSetupQuestions(vendorName string, configureCustom func
 
 type Client struct {
 	*plugins.PluginBase
-	ApiKey              *plugins.SetupQuestion
-	ApiBaseURL          *plugins.SetupQuestion
-	ApiClient           *openai.Client
-	ImplementsResponses bool // Whether this provider supports the Responses API
-	httpClient          *http.Client
+	ApiKey                    *plugins.SetupQuestion
+	ApiBaseURL                *plugins.SetupQuestion
+	openRouterProviderOrder   *plugins.SetupQuestion
+	openRouterAllowFallbacks  *plugins.SetupQuestion
+	ApiClient                 *openai.Client
+	ImplementsResponses       bool // Whether this provider supports the Responses API
+	httpClient                *http.Client
+	openRouterProviderRouting *openRouterProviderRouting
 }
 
 // SetResponsesAPIEnabled configures whether to use the Responses API
@@ -92,6 +99,9 @@ func (o *Client) configure() (ret error) {
 	// Initialize HTTP client for direct API calls (reused across requests)
 	o.httpClient = &http.Client{
 		Timeout: 10 * time.Second,
+	}
+	if err := o.configureOpenRouterProviderRouting(); err != nil {
+		return err
 	}
 	return
 }
@@ -279,6 +289,7 @@ func (o *Client) buildResponseParams(
 		ret.Reasoning = shared.ReasoningParam{Effort: eff}
 	}
 
+	extraFields := o.buildRequestExtraFields()
 	if !opts.Raw {
 		ret.Temperature = openai.Float(opts.Temperature)
 		if opts.TopP != 0 {
@@ -288,8 +299,7 @@ func (o *Client) buildResponseParams(
 			ret.MaxOutputTokens = openai.Int(int64(opts.MaxTokens))
 		}
 
-		// Add parameters not officially supported by Responses API as extra fields
-		extraFields := make(map[string]any)
+		// Add parameters not officially supported by Responses API as extra fields.
 		if opts.PresencePenalty != 0 {
 			extraFields["presence_penalty"] = opts.PresencePenalty
 		}
@@ -299,9 +309,9 @@ func (o *Client) buildResponseParams(
 		if opts.Seed != 0 {
 			extraFields["seed"] = opts.Seed
 		}
-		if len(extraFields) > 0 {
-			ret.SetExtraFields(extraFields)
-		}
+	}
+	if len(extraFields) > 0 {
+		ret.SetExtraFields(extraFields)
 	}
 	return
 }

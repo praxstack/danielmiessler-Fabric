@@ -27,11 +27,20 @@ import (
 
 type Flags struct {
 	Pattern                         string               `short:"p" long:"pattern" yaml:"pattern" description:"Choose a pattern from the available patterns" default:""`
+	Pipeline                        string               `long:"pipeline" description:"Run a named pipeline"`
+	ValidatePipeline                string               `long:"validate-pipeline" description:"Validate a pipeline definition file and exit"`
+	ValidateOnly                    bool                 `long:"validate-only" description:"Validate the selected pipeline and exit"`
+	FromStage                       string               `long:"from-stage" description:"Run pipeline stages starting from the given stage id (inclusive)"`
+	ToStage                         string               `long:"to-stage" description:"Run pipeline stages up to the given stage id (inclusive)"`
+	OnlyStage                       string               `long:"only-stage" description:"Run only the specified pipeline stage id"`
+	PipelineEventsJSON              bool                 `long:"pipeline-events-json" description:"Emit pipeline lifecycle events as JSON lines on stderr"`
 	PatternVariables                map[string]string    `short:"v" long:"variable" description:"Values for pattern variables, e.g. -v=#role:expert -v=#points:30"`
 	Context                         string               `short:"C" long:"context" description:"Choose a context from the available contexts" default:""`
 	Session                         string               `long:"session" description:"Choose a session from the available sessions"`
 	Attachments                     []string             `short:"a" long:"attachment" description:"Attachment path or URL (e.g. for OpenAI image recognition messages)"`
 	Setup                           bool                 `short:"S" long:"setup" description:"Run setup for all reconfigurable parts of fabric"`
+	ConfigureProvider               string               `long:"configure-provider" description:"Configure a single AI provider and persist its settings"`
+	ConfigureModel                  bool                 `long:"configure-model" description:"Choose and persist the default provider/model"`
 	Temperature                     float64              `short:"t" long:"temperature" yaml:"temperature" description:"Set temperature" default:"0.7"`
 	TopP                            float64              `short:"T" long:"topp" yaml:"topp" description:"Set top P" default:"0.9"`
 	Stream                          bool                 `short:"s" long:"stream" yaml:"stream" description:"Stream"`
@@ -39,6 +48,7 @@ type Flags struct {
 	Raw                             bool                 `short:"r" long:"raw" yaml:"raw" description:"Use the defaults of the model without sending chat options (temperature, top_p, etc.). Only affects OpenAI-compatible providers. Anthropic models always use smart parameter selection to comply with model-specific requirements."`
 	FrequencyPenalty                float64              `short:"F" long:"frequencypenalty" yaml:"frequencypenalty" description:"Set frequency penalty" default:"0.0"`
 	ListPatterns                    bool                 `short:"l" long:"listpatterns" description:"List all patterns"`
+	ListPipelines                   bool                 `long:"listpipelines" description:"List all pipelines"`
 	ListAllModels                   bool                 `short:"L" long:"listmodels" description:"List all available models"`
 	ListAllContexts                 bool                 `short:"x" long:"listcontexts" description:"List all contexts"`
 	ListAllSessions                 bool                 `short:"X" long:"listsessions" description:"List all sessions"`
@@ -51,7 +61,7 @@ type Flags struct {
 	Output                          string               `short:"o" long:"output" description:"Output to file" default:""`
 	OutputSession                   bool                 `long:"output-session" description:"Output the entire session (also a temporary one) to the output file"`
 	LatestPatterns                  string               `short:"n" long:"latest" description:"Number of latest patterns to list" default:"0"`
-	ChangeDefaultModel              bool                 `short:"d" long:"changeDefaultModel" description:"Change default model"`
+	ChangeDefaultModel              bool                 `short:"d" long:"changeDefaultModel" description:"Change default model (legacy alias for --configure-model)"`
 	YouTube                         string               `short:"y" long:"youtube" description:"YouTube video or play list \"URL\" to grab transcript, comments from it and send to chat or print it put to the console and store it in the output file"`
 	YouTubePlaylist                 bool                 `long:"playlist" description:"Prefer playlist over video if both ids are present in the URL"`
 	YouTubeTranscript               bool                 `long:"transcript" description:"Grab transcript from YouTube video and send to chat (it is used per default)."`
@@ -62,6 +72,7 @@ type Flags struct {
 	Spotify                         string               `long:"spotify" description:"Spotify podcast or episode URL to grab metadata from and send to chat"`
 	Language                        string               `short:"g" long:"language" description:"Specify the Language Code for the chat, e.g. -g=en -g=zh" default:""`
 	ScrapeURL                       string               `short:"u" long:"scrape_url" description:"Scrape website URL to markdown using Jina AI"`
+	Source                          string               `long:"source" description:"File or directory source for pipeline execution"`
 	ScrapeQuestion                  string               `short:"q" long:"scrape_question" description:"Search question using Jina AI"`
 	Seed                            int                  `short:"e" long:"seed" yaml:"seed" description:"Seed to be used for LMM generation"`
 	WipeContext                     string               `short:"w" long:"wipecontext" description:"Wipe context"`
@@ -107,9 +118,16 @@ type Flags struct {
 	Thinking                        domain.ThinkingLevel `long:"thinking" yaml:"thinking" description:"Set reasoning/thinking level (e.g., off, low, medium, high, or numeric tokens for Anthropic or Google Gemini)"`
 	ShowMetadata                    bool                 `long:"show-metadata" description:"Print metadata to stderr"`
 	Debug                           int                  `long:"debug" description:"Set debug level (0=off, 1=basic, 2=detailed, 3=trace, 4=wire)" default:"0"`
+
+	stdinMessage    string
+	stdinProvided   bool
+	argumentMessage string
 }
 
-// Init Initialize flags. returns a Flags struct and an error
+// Init initializes and returns a Flags populated from command-line arguments, optional YAML configuration, stdin, and positional arguments.
+// It sets the debug level, applies defaults, and merges YAML config values for any flags not supplied on the CLI.
+// It also reads piped stdin and appends positional arguments to the Flags message.
+// Returns a pointer to the populated Flags and any error encountered while parsing flags, loading or applying the YAML config, performing type conversions, or reading stdin.
 func Init() (ret *Flags, err error) {
 	debuglog.SetLevel(debuglog.LevelFromInt(parseDebugLevel(os.Args[1:])))
 	// Track which yaml-configured flags were set on CLI
@@ -223,7 +241,8 @@ func Init() (ret *Flags, err error) {
 
 	// Append positional arguments to the message (custom message)
 	if len(args) > 0 {
-		ret.Message = AppendMessage(ret.Message, strings.Join(args, " "))
+		ret.argumentMessage = strings.Join(args, " ")
+		ret.Message = AppendMessage(ret.Message, ret.argumentMessage)
 	}
 
 	if pipedToStdin {
@@ -231,6 +250,8 @@ func Init() (ret *Flags, err error) {
 		if pipedMessage, err = readStdin(); err != nil {
 			return
 		}
+		ret.stdinProvided = true
+		ret.stdinMessage = pipedMessage
 		ret.Message = AppendMessage(ret.Message, pipedMessage)
 	}
 	return
