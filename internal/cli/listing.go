@@ -9,13 +9,18 @@ import (
 
 	"github.com/danielmiessler/fabric/internal/core"
 	"github.com/danielmiessler/fabric/internal/i18n"
+	"github.com/danielmiessler/fabric/internal/pipeline"
 	"github.com/danielmiessler/fabric/internal/plugins/ai"
 	"github.com/danielmiessler/fabric/internal/plugins/ai/gemini"
 	"github.com/danielmiessler/fabric/internal/plugins/db/fsdb"
 )
 
 // handleListingCommands handles listing-related commands
-// Returns (handled, error) where handled indicates if a command was processed and should exit
+// handleListingCommands processes any listing-related CLI flags and performs the requested listing action
+// (patterns, pipelines, models, contexts, sessions, strategies, vendors, Gemini voices, or transcription models).
+//
+// It returns a boolean that is true when a listing command was handled (the caller should exit) and an error
+// if an operation failed; when no listing flag is set it returns false, nil.
 func handleListingCommands(currentFlags *Flags, fabricDb *fsdb.Db, registry *core.PluginRegistry) (handled bool, err error) {
 	if currentFlags.LatestPatterns != "0" {
 		var parsedToInt int
@@ -56,14 +61,51 @@ func handleListingCommands(currentFlags *Flags, fabricDb *fsdb.Db, registry *cor
 		return true, err
 	}
 
+	if currentFlags.ListPipelines {
+		loader, loadErr := pipeline.NewDefaultLoader()
+		if loadErr != nil {
+			return true, loadErr
+		}
+		entries, loadErr := loader.List()
+		if loadErr != nil {
+			return true, loadErr
+		}
+		for _, entry := range entries {
+			if currentFlags.ShellCompleteOutput {
+				fmt.Println(entry.Name)
+				continue
+			}
+			override := ""
+			if entry.OverridesBuiltIn {
+				override = " (overrides built-in)"
+			}
+			fmt.Printf("%s\t%s%s\n", entry.Name, entry.DefinitionSource, override)
+		}
+		return true, nil
+	}
+
 	if currentFlags.ListAllModels {
 		var models *ai.VendorsModels
-		if models, err = registry.VendorManager.GetModels(); err != nil {
+		if models, err = registry.GetModels(); err != nil {
+			if isNoConfiguredVendorsError(err) {
+				if currentFlags.ShellCompleteOutput {
+					return true, nil
+				}
+				fmt.Println(formatListModelsBootstrapGuidance(currentFlags.Vendor))
+				return true, nil
+			}
 			return true, err
 		}
 
 		if currentFlags.Vendor != "" {
 			models = models.FilterByVendor(currentFlags.Vendor)
+			if len(models.GroupsItems) == 0 {
+				if currentFlags.ShellCompleteOutput {
+					return true, nil
+				}
+				fmt.Println(formatListModelsBootstrapGuidance(currentFlags.Vendor))
+				return true, nil
+			}
 		}
 
 		if currentFlags.ShellCompleteOutput {
