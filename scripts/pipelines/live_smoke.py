@@ -62,22 +62,22 @@ Use explicit validation stages and fail fast on contract violations.
 
 DEFAULT_CASES: tuple[SmokeCase, ...] = (
     SmokeCase(
-        pipeline="technical-study-guide",
+        pipeline="study-guide-technical",
         to_stage="semantic_map_generate",
         stdin_text=GENERAL_SOURCE_TEXT,
     ),
     SmokeCase(
-        pipeline="nontechnical-study-guide",
+        pipeline="study-guide-conceptual",
         to_stage="semantic_map_generate",
         stdin_text=GENERAL_SOURCE_TEXT,
     ),
     SmokeCase(
-        pipeline="note-enhancement",
+        pipeline="enhance-notes",
         to_stage="enhance_generate",
         stdin_text=NOTE_ENHANCEMENT_TEXT,
     ),
     SmokeCase(
-        pipeline="therapy-conversation-notes",
+        pipeline="conversation-notes",
         to_stage="analyze_generate",
         stdin_text=THERAPY_SOURCE_TEXT,
     ),
@@ -90,6 +90,21 @@ DEFAULT_CASES: tuple[SmokeCase, ...] = (
         pipeline="zoom-tech-note-deep-pass",
         to_stage="stage1_refine_generate",
         stdin_text=ZOOM_CAPTION_TEXT,
+    ),
+    SmokeCase(
+        pipeline="transcript-to-notes",
+        to_stage="generate_notes",
+        stdin_text=GENERAL_SOURCE_TEXT,
+    ),
+    SmokeCase(
+        pipeline="summarize",
+        to_stage="generate_summary",
+        stdin_text=GENERAL_SOURCE_TEXT,
+    ),
+    SmokeCase(
+        pipeline="extract-insights",
+        to_stage="generate_insights",
+        stdin_text=GENERAL_SOURCE_TEXT,
     ),
 )
 

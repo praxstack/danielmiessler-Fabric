@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,9 +102,7 @@ func buildCommandEnv(stage Stage, runDir string, source RunSource, invocationDir
 	for _, artifact := range stage.Artifacts {
 		env[artifactEnvKey(artifact.Name)] = filepath.Join(runDir, artifact.Path)
 	}
-	for key, value := range stageEnv {
-		env[key] = value
-	}
+	maps.Copy(env, stageEnv)
 
 	keys := make([]string, 0, len(env))
 	for key := range env {

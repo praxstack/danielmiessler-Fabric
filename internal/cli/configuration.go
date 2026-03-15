@@ -17,6 +17,9 @@ import (
 // Returns (handled, error) where handled indicates if a command was processed and should exit.
 func handleConfigurationCommands(currentFlags *Flags, registry *core.PluginRegistry) (handled bool, err error) {
 	if currentFlags.UpdatePatterns {
+		if registry == nil {
+			return true, errors.New("fabric configuration is not initialized; run fabric --setup first")
+		}
 		if err = registry.PatternsLoader.PopulateDB(); err != nil {
 			return true, err
 		}

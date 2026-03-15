@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -573,9 +575,7 @@ func (r *Runner) emitJSONEvent(eventType string, payload map[string]any) {
 		"type": eventType,
 		"time": time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	for key, value := range payload {
-		event[key] = value
-	}
+	maps.Copy(event, payload)
 	encoded, err := json.Marshal(event)
 	if err != nil {
 		return
@@ -618,10 +618,8 @@ func validateAcceptedSource(p *Pipeline, mode SourceMode) error {
 	if len(p.Accepts) == 0 {
 		return nil
 	}
-	for _, allowed := range p.Accepts {
-		if allowed == mode {
-			return nil
-		}
+	if slices.Contains(p.Accepts, mode) {
+		return nil
 	}
 	return fmt.Errorf("pipeline %q does not accept source mode %q", p.Name, mode)
 }

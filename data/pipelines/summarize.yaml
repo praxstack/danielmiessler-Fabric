@@ -1,0 +1,20 @@
+version: 1
+name: summarize
+description: Produce a structured summary from any input text.
+accepts:
+  - stdin
+  - source
+  - scrape_url
+stages:
+  - id: generate_summary
+    executor: fabric_pattern
+    pattern: ../patterns/pipeline_summarize/system.md
+    stream: true
+    final_output: true
+    primary_output:
+      from: stdout
+  - id: validate_output
+    role: validate
+    executor: builtin
+    builtin:
+      name: validate_declared_outputs

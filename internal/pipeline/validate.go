@@ -3,6 +3,7 @@ package pipeline
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 func Validate(p *Pipeline) error {
@@ -89,6 +90,10 @@ func Validate(p *Pipeline) error {
 			}
 			if filepath.IsAbs(artifact.Path) {
 				return fmt.Errorf("pipeline %q stage %q artifact %q path must be relative", p.Name, stage.ID, artifact.Name)
+			}
+			cleaned := filepath.Clean(artifact.Path)
+			if strings.HasPrefix(cleaned, "..") {
+				return fmt.Errorf("pipeline %q stage %q artifact %q path must not escape run directory", p.Name, stage.ID, artifact.Name)
 			}
 		}
 

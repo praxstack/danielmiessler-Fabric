@@ -93,8 +93,8 @@ type CommandConfig struct {
 }
 
 type BuiltinConfig struct {
-	Name   string                 `yaml:"name"`
-	Config map[string]interface{} `yaml:"config,omitempty"`
+	Name   string         `yaml:"name"`
+	Config map[string]any `yaml:"config,omitempty"`
 }
 
 type ArtifactDeclaration struct {

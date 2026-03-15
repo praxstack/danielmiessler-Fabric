@@ -301,10 +301,17 @@ func captureStdout(run func() error) (string, error) {
 		return "", err
 	}
 	os.Stdout = w
+	closed := false
+	defer func() {
+		os.Stdout = original
+		if !closed {
+			_ = w.Close()
+		}
+	}()
 
 	runErr := run()
 	closeErr := w.Close()
-	os.Stdout = original
+	closed = true
 
 	var buffer bytes.Buffer
 	if _, copyErr := io.Copy(&buffer, r); copyErr != nil {

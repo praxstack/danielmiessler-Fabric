@@ -10,6 +10,9 @@ import (
 )
 
 func (r *Runner) executeBuiltinStage(_ context.Context, stage Stage, runtimeCtx StageRuntimeContext) (*StageExecutionResult, error) {
+	if stage.Builtin == nil {
+		return nil, fmt.Errorf("builtin stage %q is missing builtin configuration", stage.ID)
+	}
 	switch stage.Builtin.Name {
 	case "passthrough", "noop", "source_capture":
 		return &StageExecutionResult{Stdout: runtimeCtx.InputPayload}, nil

@@ -8,14 +8,14 @@ Ship a Fabric-native `zoom-tech-note` pipeline inside this repository that prese
 
 The reference behavior is the existing Zoom pipeline at:
 
-- `/Users/praxlannister/Documents/Zoom/transcript-pipeline-kit/scripts/ingest_zoom_captions.py`
-- `/Users/praxlannister/Documents/Zoom/transcript-pipeline-kit/scripts/run_chat_pipeline.py`
-- `/Users/praxlannister/Documents/Zoom/transcript-pipeline-kit/scripts/validate_coverage.py`
-- `/Users/praxlannister/Documents/Zoom/transcript-pipeline-kit/scripts/publish_tutorial_notes.py`
-- `/Users/praxlannister/Documents/Zoom/transcript-pipeline-kit/docs/prompts/stages/stage1-refine.md`
-- `/Users/praxlannister/Documents/Zoom/transcript-pipeline-kit/docs/prompts/stages/stage2-synthesize.md`
-- `/Users/praxlannister/Documents/Zoom/transcript-pipeline-kit/docs/prompts/stages/stage3-enhance.md`
-- `/Users/praxlannister/Documents/Zoom/transcript-pipeline-kit/docs/prompts/references/tutorial-tech-bar-raiser.md`
+- `<zoom-pipeline-repo>/scripts/ingest_zoom_captions.py`
+- `<zoom-pipeline-repo>/scripts/run_chat_pipeline.py`
+- `<zoom-pipeline-repo>/scripts/validate_coverage.py`
+- `<zoom-pipeline-repo>/scripts/publish_tutorial_notes.py`
+- `<zoom-pipeline-repo>/docs/prompts/stages/stage1-refine.md`
+- `<zoom-pipeline-repo>/docs/prompts/stages/stage2-synthesize.md`
+- `<zoom-pipeline-repo>/docs/prompts/stages/stage3-enhance.md`
+- `<zoom-pipeline-repo>/docs/prompts/references/tutorial-tech-bar-raiser.md`
 
 The parity target is:
 

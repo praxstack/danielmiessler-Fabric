@@ -325,3 +325,8 @@ tmp/
 
 # Ignore .claude/
 .claude/
+
+.agent/
+.agentMemory/
+.vscode/mcp.json
+fabric

@@ -1,0 +1,20 @@
+version: 1
+name: extract-insights
+description: Extract themes, insights, and action items from any text.
+accepts:
+  - stdin
+  - source
+  - scrape_url
+stages:
+  - id: generate_insights
+    executor: fabric_pattern
+    pattern: ../patterns/extract_insights/system.md
+    stream: true
+    final_output: true
+    primary_output:
+      from: stdout
+  - id: validate_output
+    role: validate
+    executor: builtin
+    builtin:
+      name: validate_declared_outputs

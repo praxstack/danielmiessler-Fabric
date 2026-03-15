@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,18 @@ func CleanupRunDirFromEnv() (bool, error) {
 	runDir := os.Getenv(cleanupRunDirEnv)
 	if runDir == "" {
 		return false, nil
+	}
+
+	// Validate the path before trusting it for recursive deletion.
+	cleaned := filepath.Clean(runDir)
+	if !filepath.IsAbs(cleaned) {
+		return true, fmt.Errorf("cleanup target must be absolute: %s", runDir)
+	}
+	if cleaned == "/" || cleaned == filepath.Dir(cleaned) {
+		return true, fmt.Errorf("cleanup target is a filesystem root: %s", runDir)
+	}
+	if !strings.Contains(cleaned, ".pipeline") {
+		return true, fmt.Errorf("cleanup target does not look like a pipeline run directory: %s", runDir)
 	}
 
 	delay := defaultCleanupWait
