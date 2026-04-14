@@ -13,7 +13,10 @@ import (
 	"github.com/danielmiessler/fabric/internal/tools/youtube"
 )
 
-// Cli Controls the cli. It takes in the flags and runs the appropriate functions
+// Cli controls the command-line interface, parsing flags and dispatching the appropriate commands and processing paths.
+// It prints the provided version when the Version flag is set, ensures environment configuration when setup or configure flags are used, initializes the plugin/registry backend and configures vendor features (such as OpenAI Responses API), and executes command handlers in sequence (setup/server, configuration, listing, management, extension, pipeline).
+// It also handles optional preprocessing steps such as transcription, HTML readability cleaning, tool-based processing, and finally chat processing; tool-only operations return early when appropriate.
+// Cli returns a non-nil error if initialization or any command handler fails, and returns nil when a command is handled successfully or processing completes without error.
 func Cli(version string) (err error) {
 	var currentFlags *Flags
 	if currentFlags, err = Init(); err != nil {
@@ -25,7 +28,7 @@ func Cli(version string) (err error) {
 		return
 	}
 
-	if currentFlags.Setup {
+	if currentFlags.Setup || currentFlags.ConfigureProvider != "" || currentFlags.ConfigureModel || currentFlags.ChangeDefaultModel {
 		if err = ensureEnvFile(); err != nil {
 			return
 		}
@@ -77,6 +80,12 @@ func Cli(version string) (err error) {
 
 	// Handle extension commands
 	if handled, err = handleExtensionCommands(currentFlags, registry); err != nil || handled {
+		return
+	}
+
+	// Handle pipeline commands before tool/chat processing so pipeline source flags
+	// do not fall through into the chat-oriented scrape/tool path.
+	if handled, err = handlePipelineCommands(currentFlags, registry); err != nil || handled {
 		return
 	}
 

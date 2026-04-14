@@ -14,8 +14,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielmiessler/fabric/internal/domain"
@@ -31,6 +33,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	smithybearer "github.com/aws/smithy-go/auth/bearer"
 
 	"github.com/danielmiessler/fabric/internal/chat"
 )
@@ -62,25 +65,6 @@ type BedrockClient struct {
 	bedrockAPIKey    *plugins.SetupQuestion
 }
 
-// bearerTokenTransport is an http.RoundTripper that injects an Authorization
-// Bearer header into every outgoing request. Used for ABSK key authentication.
-type bearerTokenTransport struct {
-	token   string
-	wrapped http.RoundTripper
-}
-
-func (t *bearerTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	clone := req.Clone(req.Context())
-	clone.Header.Set("Authorization", "Bearer "+t.token)
-	return t.wrapped.RoundTrip(clone)
-}
-
-// String implements fmt.Stringer with token redaction to prevent accidental
-// exposure of the ABSK key in logs or debug output.
-func (t *bearerTokenTransport) String() string {
-	return "bearerTokenTransport{token:REDACTED}"
-}
-
 // defaultBedrockModels is a minimal fallback used ONLY when the ListFoundationModels
 // and ListInferenceProfiles APIs are not accessible. The primary model listing is always
 // fetched programmatically via listModelsFromAPI() which calls the Bedrock control plane.
@@ -95,6 +79,8 @@ var defaultBedrockModels = []string{
 	"us.amazon.nova-pro-v1:0",
 	"us.meta.llama3-3-70b-instruct-v1:0",
 }
+
+var awsProfileEnvMu sync.Mutex
 
 // setupModelChoices is shown during interactive setup. Includes both unprefixed
 // model IDs (work in any region) and common region-prefixed inference profiles.
@@ -387,28 +373,32 @@ func (c *BedrockClient) configure() error {
 	}
 
 	// Priority 1: Bearer token / API key (ABSK key)
-	// We use dummy static credentials (not AnonymousCredentials) to satisfy the
-	// AWS SDK's SigV4 auth middleware. AnonymousCredentials causes the SDK to fall
-	// through to its bearer token auth path, which panics without a token provider.
-	// Our bearerTokenTransport overrides the Authorization header with the real token.
+	// Use the SDK's native bearer-token provider path instead of forcing SigV4
+	// and overwriting the Authorization header later. The native path sets the
+	// correct auth scheme preference and avoids sending SigV4 headers alongside
+	// the bearer token.
+	//
 	// When using explicit credentials (bearer token or static keys), bypass the
-	// AWS shared config/credentials files to prevent AWS_PROFILE env var from
-	// causing "failed to get shared config profile" errors. This is thread-safe
-	// (no process-global env mutation) and only affects this config load.
+	// AWS shared config/credentials files. The AWS SDK still consults
+	// AWS_PROFILE/AWS_DEFAULT_PROFILE during config loading, so explicit auth
+	// also needs those profile selectors suppressed for this one config load.
+	//
+	// This path runs during client configuration, not during request handling.
+	// We serialize the temporary env change with a mutex and restore the prior
+	// values immediately after LoadDefaultConfig returns.
+	loadConfig := config.LoadDefaultConfig
 	if c.bedrockAPIKey.Value != "" {
+		tokenProvider := smithybearer.StaticTokenProvider{
+			Token: smithybearer.Token{Value: c.bedrockAPIKey.Value},
+		}
 		configOpts = append(configOpts,
-			config.WithCredentialsProvider(
-				credentials.NewStaticCredentialsProvider("BEDROCK_BEARER", "BEDROCK_BEARER", ""),
+			config.WithBearerAuthTokenProvider(
+				tokenProvider,
 			),
-			config.WithHTTPClient(&http.Client{
-				Transport: &bearerTokenTransport{
-					token:   c.bedrockAPIKey.Value,
-					wrapped: http.DefaultTransport,
-				},
-			}),
 			config.WithSharedConfigFiles([]string{}),
 			config.WithSharedCredentialsFiles([]string{}),
 		)
+		loadConfig = loadDefaultConfigIgnoringAWSProfiles
 	} else if c.bedrockAccessKey.Value != "" && c.bedrockSecretKey.Value != "" {
 		// Priority 2: Explicit access key + secret key (static credentials)
 		configOpts = append(configOpts,
@@ -422,21 +412,72 @@ func (c *BedrockClient) configure() error {
 			config.WithSharedConfigFiles([]string{}),
 			config.WithSharedCredentialsFiles([]string{}),
 		)
+		loadConfig = loadDefaultConfigIgnoringAWSProfiles
 	}
 	// Priority 3: No explicit credentials → AWS SDK uses the default credential chain
 	// (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars, ~/.aws/credentials, IAM roles, etc.)
 
-	cfg, err := config.LoadDefaultConfig(ctx, configOpts...)
+	cfg, err := loadConfig(ctx, configOpts...)
 	if err != nil {
 		return fmt.Errorf(i18n.T("bedrock_unable_load_aws_config_with_region"), c.bedrockRegion.Value, err)
 	}
 
 	cfg.APIOptions = append(cfg.APIOptions, middleware.AddUserAgentKeyValue(userAgentKey, userAgentValue))
 
+	if c.bedrockAPIKey.Value != "" {
+		tokenProvider := smithybearer.StaticTokenProvider{
+			Token: smithybearer.Token{Value: c.bedrockAPIKey.Value},
+		}
+		c.runtimeClient = bedrockruntime.NewFromConfig(cfg, func(o *bedrockruntime.Options) {
+			o.BearerAuthTokenProvider = tokenProvider
+			o.AuthSchemePreference = []string{"httpBearerAuth"}
+		})
+		c.controlPlaneClient = bedrock.NewFromConfig(cfg, func(o *bedrock.Options) {
+			o.BearerAuthTokenProvider = tokenProvider
+			o.AuthSchemePreference = []string{"httpBearerAuth"}
+		})
+		return nil
+	}
+
 	c.runtimeClient = bedrockruntime.NewFromConfig(cfg)
 	c.controlPlaneClient = bedrock.NewFromConfig(cfg)
 
 	return nil
+}
+
+// loadDefaultConfigIgnoringAWSProfiles loads the AWS SDK configuration while temporarily
+// unsetting AWS_PROFILE and AWS_DEFAULT_PROFILE to prevent profile-based credential or
+// region selection from affecting the load.
+// 
+// It serializes the environment changes with an internal mutex and restores the previous
+// environment values after loading. Any provided LoadOptions are forwarded to
+// config.LoadDefaultConfig. The function returns the loaded aws.Config and any error
+// encountered during loading.
+func loadDefaultConfigIgnoringAWSProfiles(ctx context.Context, optFns ...func(*config.LoadOptions) error) (aws.Config, error) {
+	awsProfileEnvMu.Lock()
+	defer awsProfileEnvMu.Unlock()
+
+	previous := map[string]*string{}
+	for _, key := range []string{"AWS_PROFILE", "AWS_DEFAULT_PROFILE"} {
+		if value, ok := os.LookupEnv(key); ok {
+			valueCopy := value
+			previous[key] = &valueCopy
+			_ = os.Unsetenv(key)
+			continue
+		}
+		previous[key] = nil
+	}
+	defer func() {
+		for key, value := range previous {
+			if value == nil {
+				_ = os.Unsetenv(key)
+				continue
+			}
+			_ = os.Setenv(key, *value)
+		}
+	}()
+
+	return config.LoadDefaultConfig(ctx, optFns...)
 }
 
 // ListModels retrieves all available foundation models and inference profiles
